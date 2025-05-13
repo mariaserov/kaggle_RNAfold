@@ -1,0 +1,13 @@
+prefix=/Users/mashaserova/Desktop/Projects/Kaggle_RNAFold/.conda
+exec_prefix=/Users/mashaserova/Desktop/Projects/Kaggle_RNAFold/.conda
+libdir=/Users/mashaserova/Desktop/Projects/Kaggle_RNAFold/.conda/lib
+sharedlibdir=/Users/mashaserova/Desktop/Projects/Kaggle_RNAFold/.conda/lib
+includedir=/Users/mashaserova/Desktop/Projects/Kaggle_RNAFold/.conda/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.2.13
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}
