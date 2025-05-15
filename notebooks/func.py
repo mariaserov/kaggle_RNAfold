@@ -89,9 +89,13 @@ def score(solution: pd.DataFrame, submission: pd.DataFrame, row_id_column_name: 
     Returns:
         float: the average highest TM-scores.
     """
+    print("This is the correct file")
 
-    os.system('cp //kaggle/input/usalign/USalign /kaggle/working/')
-    os.system('sudo chmod u+x /kaggle/working//USalign')
+    USALIGN_LOCAL = os.path.join(os.path.dirname(__file__), 'USalign')
+    if not os.access(USALIGN_LOCAL, os.X_OK):
+        st = os.stat(USALIGN_LOCAL)
+        os.chmod(USALIGN_LOCAL, st.st_mode | stat.S_IXUSR)
+
 
     # Extract target_id from ID (target_resid)
     solution['target_id'] = solution['ID'].apply(lambda x: x.split('_')[0])
@@ -115,7 +119,8 @@ def score(solution: pd.DataFrame, submission: pd.DataFrame, row_id_column_name: 
                 _ = write2pdb(group_predicted, pred_cnt, predicted_pdb)
 
                 if resolved_cnt > 0:
-                    command = f'/kaggle/working/USalign {predicted_pdb} {native_pdb} -atom " C1\'"'
+                    #command = f'[{USALIGN_LOCAL}] {predicted_pdb} {native_pdb} -atom " C1\'"'
+                    command = f"{USALIGN_LOCAL} {predicted_pdb} {native_pdb} -atom \" C1'\""
                     usalign_output = os.popen(command).read()
                     prediction_scores.append(parse_tmscore_output(usalign_output))
 
