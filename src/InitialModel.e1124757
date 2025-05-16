@@ -1,0 +1,12 @@
+====================================
+=== THIS MESSAGE IS NOT AN ERROR ===
+
+This module is deprecated. If you are using conda, please consider moving to our newer cluster - CX3 Phase 2.
+More info can be found here:
+https://icl-rcs-user-guide.readthedocs.io/en/latest/hpc/pilot/cx3-phase2/
+https://icl-rcs-user-guide.readthedocs.io/en/latest/hpc/pilot/cx3-phase2/#python-and-conda-environments
+
+====================================
+
+/rds/general/user/ms7024/home/kaggle_RNAfold/src/01InitialModel.py:18: FutureWarning: DataFrame.interpolate with object dtype is deprecated and will raise in a future version. Call obj.infer_objects(copy=False) before interpolating instead.
+  train_lbl = train_lbl.interpolate() # For now, interpolate - are there better imputation techniques?
