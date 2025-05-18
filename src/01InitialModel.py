@@ -6,8 +6,12 @@ from torch.utils.data import Dataset, DataLoader
 from torch.nn import Module, MSELoss
 from torch.optim import Adam
 from torch.utils.data import random_split
+import time
 
-n_epochs = 20
+n_epochs = 1
+n_job = 2
+
+start = time.time()
 
 train_seq = pd.read_csv("../data/train_sequences.csv")
 train_lbl = pd.read_csv("../data/train_labels.csv")
@@ -24,6 +28,17 @@ id_mapping[0] = "padded_row"
 train_lbl[train_lbl.iloc[:,3:6].isna().any(axis=1)] # Check which rows  rows have NaN
 
 # Create Dataset & Dataloader
+
+def collate(batch):
+    xs, ys, ids = zip(*batch)
+    len_x = [x.size(0) for x in xs]
+
+    x_padded = pad_sequence(xs, batch_first=True)
+    y_padded = pad_sequence(ys, batch_first=True)
+    id_padded = pad_sequence(ids, batch_first=True)
+
+    return x_padded, y_padded, id_padded, torch.tensor(len_x)
+
 
 nts = ['G', 'U', 'C', 'A', 'X', '-']
 mapping = {nt: idx+1 for idx, nt in enumerate(nts)}
@@ -51,18 +66,18 @@ def make_coord_tensor(train_lbl):
         
         y_list.append(torch.tensor(coords, dtype=torch.float32))
         
-    y_tensor = pad_sequence(y_list, batch_first=True)
+    #y_tensor = pad_sequence(y_list, batch_first=True)
     og_id_list = pad_sequence(og_id_list_temp, batch_first=True)
 
-    return y_list, y_tensor, og_id_list
+    return y_list, og_id_list
 
 class Rnadataset(Dataset):
     def __init__(self, train_seq, train_lbl):
         super().__init__()
         self.X_list = [tokenise_seq(seq) for seq in train_seq['sequence']]
-        self.X_tensor = pad_sequence(self.X_list, batch_first=True)
+        #self.X_tensor = pad_sequence(self.X_list, batch_first=True)
         
-        self.y_list, self.y_tensor, self.ids = make_coord_tensor(train_lbl)
+        self.y_list, self.ids = make_coord_tensor(train_lbl)
         if all(train_lbl["base_ID"].unique() == train_seq['target_id']): # Always good to check
             print("Order corresponds between sequences and coordinates")
         else:
@@ -71,10 +86,10 @@ class Rnadataset(Dataset):
         #self.ids = train_seq['target_id']
 
     def __len__(self):
-        return len(self.X_tensor)
+        return len(self.X_list)
     
     def __getitem__(self, index) :
-        return self.X_tensor[index], self.y_tensor[index], self.ids[index]
+        return self.X_list[index], self.y_list[index], self.ids[index]
     
 dataset = Rnadataset(train_seq, train_lbl)
 
@@ -83,8 +98,8 @@ test_size = int(len(dataset)-train_size)
 
 train_data, test_data = random_split(dataset, [train_size, test_size])
 
-train_loader = DataLoader(train_data, batch_size=15, shuffle=False)
-test_loader = DataLoader(test_data, batch_size=15, shuffle=False)
+train_loader = DataLoader(train_data, batch_size=32, shuffle=False, collate_fn=collate)
+test_loader = DataLoader(test_data, batch_size=32, shuffle=False, collate_fn=collate)
 
 # Define blocks of the model
 
@@ -243,6 +258,7 @@ for epoch in range(n_epochs):
     perf.iloc[epoch, :] = [epoch+1, loss_train, loss_test]
     print(f"Epoch {epoch+1}: Loss train {round(loss_train, 2)}, Loss Test {round(loss_test_val, 2)}")
 
+perf.to_csv(f'../outputs/InitialModel/initialmodel_perf{n_job}.csv')
 
 # VALIDATE
 
@@ -270,4 +286,8 @@ submission_df = pd.DataFrame(0.0, index = range(val_seq_pred.shape[0]), columns 
 submission_df[['ID', 'resname', 'resid']] = validation_lbl[['ID', 'resname', 'resid']]
 submission_df[['x_1', 'y_1', 'z_1']] = val_seq_pred.detach().numpy()
 submission_df.dtypes
-submission_df.to_csv('../outputs/InitialModel/submission.csv')
+submission_df.to_csv(f'../outputs/InitialModel/submission{n_job}.csv')
+
+end = time.time()
+
+print(f"Time for job: {end-start}s")
