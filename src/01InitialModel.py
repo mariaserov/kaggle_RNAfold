@@ -8,10 +8,11 @@ from torch.optim import Adam
 from torch.utils.data import random_split
 import time
 
-n_epochs = 15
+n_epochs = 1
 n_job = 2
 
 start = time.time()
+print("Starting training script...") # test
 
 train_seq = pd.read_csv("../data/train_sequences.csv")
 train_lbl = pd.read_csv("../data/train_labels.csv")
@@ -98,8 +99,8 @@ test_size = int(len(dataset)-train_size)
 
 train_data, test_data = random_split(dataset, [train_size, test_size])
 
-train_loader = DataLoader(train_data, batch_size=32, shuffle=False, collate_fn=collate)
-test_loader = DataLoader(test_data, batch_size=32, shuffle=False, collate_fn=collate)
+train_loader = DataLoader(train_data, batch_size=32, shuffle=False, collate_fn=collate, num_workers=8, pin_memory=True)
+test_loader = DataLoader(test_data, batch_size=32, shuffle=False, collate_fn=collate, num_workers=8, pin_memory=True)
 
 # Define blocks of the model
 
@@ -219,9 +220,8 @@ cols = ["Epoch", "Train_Loss", "Test_Loss"]
 perf = pd.DataFrame(index=range(n_epochs), columns=cols)
 
 for epoch in range(n_epochs):
+    print(f"epoch {epoch+1}")
     loss_train = []
-    epoch_pred_train = []
-    epoch_true_train = []
     num_ids = []
     seq_idx = []
     initmodel.train()
@@ -231,8 +231,6 @@ for epoch in range(n_epochs):
         pred_coords = initmodel(seq)
         loss = criterion(coords,pred_coords, pad_mask)
         loss_train.append(loss.item())
-        epoch_pred_train.append(pred_coords.detach())
-        epoch_true_train.append(coords.detach())
         num_ids.extend(ids.flatten(0,1).tolist())
         seq_idx.extend(seq.flatten(0,1).tolist())
         loss.backward()
@@ -243,14 +241,10 @@ for epoch in range(n_epochs):
     initmodel.eval()
     with torch.no_grad():
         loss_test = []
-        epoch_pred_test = []
-        epoch_true_test = []
         for seq, coords, ids, lengths in test_loader:
             pad_mask = (seq == 0)
             pred_coords_test = initmodel(seq)
             loss = criterion(coords, pred_coords_test, pad_mask)
-            epoch_true_test.extend(coords)
-            epoch_pred_test.extend(pred_coords_test)
             loss_test.append(loss.item())
         
         loss_test_val = sum(loss_test)/len(loss_test)
@@ -260,34 +254,34 @@ for epoch in range(n_epochs):
 
 perf.to_csv(f'../outputs/InitialModel/initialmodel_perf{n_job}.csv')
 
+end = time.time()
+print(f"Time for job: {end-start}s")
+
 # VALIDATE
 
 # Get validation set
 
-# validation_seq = pd.read_csv("../data/validation_sequences.csv")
-# validation_lbl = pd.read_csv("../data/validation_labels.csv")
-# validation_lbl["ID_num"] = [n+1 for n in range(len(validation_lbl))] # map ID to numeric ID to store in tensor
-# id_mapping_val = {idx+1: og_id for idx, og_id in enumerate(validation_lbl['ID'])} # create mapping to re-map back to original ID
-# id_mapping_val[0] = "padded_row"
-# val_set = Rnadataset(validation_seq, validation_lbl)
+validation_seq = pd.read_csv("../data/validation_sequences.csv")
+validation_lbl = pd.read_csv("../data/validation_labels.csv")
+validation_lbl["ID_num"] = [n+1 for n in range(len(validation_lbl))] # map ID to numeric ID to store in tensor
+id_mapping_val = {idx+1: og_id for idx, og_id in enumerate(validation_lbl['ID'])} # create mapping to re-map back to original ID
+id_mapping_val[0] = "padded_row"
+val_set = Rnadataset(validation_seq, validation_lbl)
 
-# # Make predictions on validation set
-# initmodel.eval()
-# val_pred = initmodel(val_set.X_)
+# Make predictions on validation set
+initmodel.eval()
+val_pred = initmodel(val_set.X_tensor)
 
-# mask_val = (val_set.X_tensor.flatten(0,1) != 0)
-# val_pred_flat = val_pred.flatten(0,1)
-# val_seq_pred = val_pred_flat[mask_val]
+mask_val = (val_set.X_tensor.flatten(0,1) != 0)
+val_pred_flat = val_pred.flatten(0,1)
+val_seq_pred = val_pred_flat[mask_val]
 
-# submission_cols = ['ID', 'resname', 'resid', 'x_1', 'y_1', 'z_1', 'x_2', 'y_2', 'z_2',
-#        'x_3', 'y_3', 'z_3', 'x_4', 'y_4', 'z_4', 'x_5', 'y_5', 'z_5']
+submission_cols = ['ID', 'resname', 'resid', 'x_1', 'y_1', 'z_1', 'x_2', 'y_2', 'z_2',
+       'x_3', 'y_3', 'z_3', 'x_4', 'y_4', 'z_4', 'x_5', 'y_5', 'z_5']
 
-# submission_df = pd.DataFrame(0.0, index = range(val_seq_pred.shape[0]), columns = submission_cols)
-# submission_df[['ID', 'resname', 'resid']] = validation_lbl[['ID', 'resname', 'resid']]
-# submission_df[['x_1', 'y_1', 'z_1']] = val_seq_pred.detach().numpy()
-# submission_df.dtypes
-# submission_df.to_csv(f'../outputs/InitialModel/submission{n_job}.csv')
+submission_df = pd.DataFrame(0.0, index = range(val_seq_pred.shape[0]), columns = submission_cols)
+submission_df[['ID', 'resname', 'resid']] = validation_lbl[['ID', 'resname', 'resid']]
+submission_df[['x_1', 'y_1', 'z_1']] = val_seq_pred.detach().numpy()
+submission_df.dtypes
+submission_df.to_csv(f'../outputs/InitialModel/submission{n_job}.csv')
 
-end = time.time()
-
-print(f"Time for job: {end-start}s")

@@ -1,4 +1,4 @@
-#PBS -l walltime=30:00:00
+#PBS -l walltime=8:00:00
 #PBS -l select=1:ncpus=9:mem=300gb
 #PBS -N InitialModel
 
