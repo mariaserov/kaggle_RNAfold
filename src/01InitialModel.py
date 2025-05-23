@@ -8,7 +8,7 @@ from torch.optim import Adam
 from torch.utils.data import random_split
 import time
 
-n_epochs = 1
+n_epochs = 15
 n_job = 2
 
 start = time.time()
@@ -209,7 +209,7 @@ def coords_to_df_train(tensor_list):
     return df 
 
 # TRAIN 
-max_seq_len = dataset.X_tensor.size(1)*2
+max_seq_len = max(x.size(0) for x in dataset.X_list) * 2
 
 initmodel = InitModel(max_len=max_seq_len)
 criterion = DistanceMatrixLoss()
@@ -225,7 +225,7 @@ for epoch in range(n_epochs):
     num_ids = []
     seq_idx = []
     initmodel.train()
-    for seq, coords, ids in train_loader:
+    for seq, coords, ids, lengths in train_loader:
         pad_mask = (seq == 0)
         optimiser.zero_grad()
         pred_coords = initmodel(seq)
@@ -245,7 +245,7 @@ for epoch in range(n_epochs):
         loss_test = []
         epoch_pred_test = []
         epoch_true_test = []
-        for seq, coords, ids in test_loader:
+        for seq, coords, ids, lengths in test_loader:
             pad_mask = (seq == 0)
             pred_coords_test = initmodel(seq)
             loss = criterion(coords, pred_coords_test, pad_mask)
@@ -255,7 +255,7 @@ for epoch in range(n_epochs):
         
         loss_test_val = sum(loss_test)/len(loss_test)
     
-    perf.iloc[epoch, :] = [epoch+1, loss_train, loss_test]
+    perf.iloc[epoch, :] = [epoch+1, loss_train, loss_test_val]
     print(f"Epoch {epoch+1}: Loss train {round(loss_train, 2)}, Loss Test {round(loss_test_val, 2)}")
 
 perf.to_csv(f'../outputs/InitialModel/initialmodel_perf{n_job}.csv')
@@ -264,29 +264,29 @@ perf.to_csv(f'../outputs/InitialModel/initialmodel_perf{n_job}.csv')
 
 # Get validation set
 
-validation_seq = pd.read_csv("../data/validation_sequences.csv")
-validation_lbl = pd.read_csv("../data/validation_labels.csv")
-validation_lbl["ID_num"] = [n+1 for n in range(len(validation_lbl))] # map ID to numeric ID to store in tensor
-id_mapping_val = {idx+1: og_id for idx, og_id in enumerate(validation_lbl['ID'])} # create mapping to re-map back to original ID
-id_mapping_val[0] = "padded_row"
-val_set = Rnadataset(validation_seq, validation_lbl)
+# validation_seq = pd.read_csv("../data/validation_sequences.csv")
+# validation_lbl = pd.read_csv("../data/validation_labels.csv")
+# validation_lbl["ID_num"] = [n+1 for n in range(len(validation_lbl))] # map ID to numeric ID to store in tensor
+# id_mapping_val = {idx+1: og_id for idx, og_id in enumerate(validation_lbl['ID'])} # create mapping to re-map back to original ID
+# id_mapping_val[0] = "padded_row"
+# val_set = Rnadataset(validation_seq, validation_lbl)
 
-# Make predictions on validation set
-initmodel.eval()
-val_pred = initmodel(val_set.X_tensor)
+# # Make predictions on validation set
+# initmodel.eval()
+# val_pred = initmodel(val_set.X_)
 
-mask_val = (val_set.X_tensor.flatten(0,1) != 0)
-val_pred_flat = val_pred.flatten(0,1)
-val_seq_pred = val_pred_flat[mask_val]
+# mask_val = (val_set.X_tensor.flatten(0,1) != 0)
+# val_pred_flat = val_pred.flatten(0,1)
+# val_seq_pred = val_pred_flat[mask_val]
 
-submission_cols = ['ID', 'resname', 'resid', 'x_1', 'y_1', 'z_1', 'x_2', 'y_2', 'z_2',
-       'x_3', 'y_3', 'z_3', 'x_4', 'y_4', 'z_4', 'x_5', 'y_5', 'z_5']
+# submission_cols = ['ID', 'resname', 'resid', 'x_1', 'y_1', 'z_1', 'x_2', 'y_2', 'z_2',
+#        'x_3', 'y_3', 'z_3', 'x_4', 'y_4', 'z_4', 'x_5', 'y_5', 'z_5']
 
-submission_df = pd.DataFrame(0.0, index = range(val_seq_pred.shape[0]), columns = submission_cols)
-submission_df[['ID', 'resname', 'resid']] = validation_lbl[['ID', 'resname', 'resid']]
-submission_df[['x_1', 'y_1', 'z_1']] = val_seq_pred.detach().numpy()
-submission_df.dtypes
-submission_df.to_csv(f'../outputs/InitialModel/submission{n_job}.csv')
+# submission_df = pd.DataFrame(0.0, index = range(val_seq_pred.shape[0]), columns = submission_cols)
+# submission_df[['ID', 'resname', 'resid']] = validation_lbl[['ID', 'resname', 'resid']]
+# submission_df[['x_1', 'y_1', 'z_1']] = val_seq_pred.detach().numpy()
+# submission_df.dtypes
+# submission_df.to_csv(f'../outputs/InitialModel/submission{n_job}.csv')
 
 end = time.time()
 
