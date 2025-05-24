@@ -1,0 +1,7 @@
+Starting training script...
+Order corresponds between sequences and coordinates
+Running epoch 1
+Epoch 1 (10255.764558553696s): Loss train 5984.77, Loss Test 5799.75
+Running epoch 2
+Epoch 2 (9642.949433326721s): Loss train 5081.35, Loss Test 5012.71
+Running epoch 3

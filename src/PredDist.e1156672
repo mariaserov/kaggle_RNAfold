@@ -1,0 +1,30 @@
+====================================
+=== THIS MESSAGE IS NOT AN ERROR ===
+
+This module is deprecated. If you are using conda, please consider moving to our newer cluster - CX3 Phase 2.
+More info can be found here:
+https://icl-rcs-user-guide.readthedocs.io/en/latest/hpc/pilot/cx3-phase2/
+https://icl-rcs-user-guide.readthedocs.io/en/latest/hpc/pilot/cx3-phase2/#python-and-conda-environments
+
+====================================
+
+/rds/general/user/ms7024/home/kaggle_RNAfold/src/02PredDist.py:24: FutureWarning: DataFrame.interpolate with object dtype is deprecated and will raise in a future version. Call obj.infer_objects(copy=False) before interpolating instead.
+  train_lbl = train_lbl.interpolate() # For now, interpolate - are there better imputation techniques?
+Traceback (most recent call last):
+  File "/rds/general/user/ms7024/home/kaggle_RNAfold/src/02PredDist.py", line 243, in <module>
+    pred_i = initmodel(seq)
+  File "/rds/general/user/ms7024/home/anaconda3/envs/r413/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/rds/general/user/ms7024/home/anaconda3/envs/r413/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/rds/general/user/ms7024/home/kaggle_RNAfold/src/02PredDist.py", line 211, in forward
+    pos_embd = self.pos_embedding(positions)
+  File "/rds/general/user/ms7024/home/anaconda3/envs/r413/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/rds/general/user/ms7024/home/anaconda3/envs/r413/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/rds/general/user/ms7024/home/anaconda3/envs/r413/lib/python3.9/site-packages/torch/nn/modules/sparse.py", line 190, in forward
+    return F.embedding(
+  File "/rds/general/user/ms7024/home/anaconda3/envs/r413/lib/python3.9/site-packages/torch/nn/functional.py", line 2551, in embedding
+    return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
+IndexError: index out of range in self

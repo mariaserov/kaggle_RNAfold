@@ -19,6 +19,7 @@ train_lbl = pd.read_csv("../data/train_labels.csv")
 
 # train_seq = pd.read_csv("../toy_data/train_sequences.csv")
 # train_lbl = pd.read_csv("../toy_data/train_labels.csv")
+
 train_lbl = train_lbl.infer_objects()
 train_lbl = train_lbl.interpolate() # For now, interpolate - are there better imputation techniques?
 
@@ -102,6 +103,31 @@ train_data, test_data = random_split(dataset, [train_size, test_size])
 train_loader = DataLoader(train_data, batch_size=32, shuffle=False, collate_fn=collate, num_workers=8, pin_memory=True)
 test_loader = DataLoader(test_data, batch_size=32, shuffle=False, collate_fn=collate, num_workers=8, pin_memory=True)
 
+# Map coord to d & vice versa
+
+def pairwise_distance_matrix(X):
+    diff = X.unsqueeze(2) - X.unsqueeze(1)  # shape: (batch, 35, 35, 5)
+    return torch.norm(diff, dim=-1)
+
+def distances_to_coords(D):
+    L = D.shape[0] # D: (L, L) symmetric, zero diagonal
+    I = torch.eye(L) # Centering matrix - LxL identity
+    ones = torch.ones((L, L)) / L
+    H = I - ones
+
+    D2 = D**2 # Squared distances
+    B = -0.5 * H @ D2 @ H # Double‐centered Gram matrix
+
+    # Eigen‐decomposition
+    eigvals, eigvecs = torch.linalg.eigh(B)
+    # Sort descending
+    idx = torch.argsort(eigvals, descending=True)
+    vals = eigvals[idx][:3]
+    vecs = eigvecs[:, idx][:, :3]
+
+    # Coordinates = V * sqrt(Λ)
+    return vecs * torch.sqrt(vals).unsqueeze(0)
+
 # Define blocks of the model
 
 class SeqEncoder(nn.Module): # Define single encoder block
@@ -140,18 +166,38 @@ class ConvEncoder(nn.Module): # define a whole transformer pipeline
         for layer in self.layers:
             X = layer(X, padding_mask=padding_mask)
         return X
-    
+
+class DistancePredictor(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        f = 4 * hidden_size
+        self.mlp = nn.Sequential(
+            nn.Linear(f, hidden_size),
+            nn.GELU(),
+            nn.Linear(hidden_size, 1))
+        
+    def forward(self, X):
+        b, l, d = X.size()
+        Xi = X.unsqueeze(2).expand(-1, -1, l, -1) # position i
+        Xj = X.unsqueeze(1).expand(-1, l, -1, -1) # position j
+        f = torch.cat([Xi, Xj, Xi-Xj, Xi*Xj], dim = -1) # stack i & j repr, their distance (-), and similarity (*)
+        d = self.mlp(f).squeeze(-1)
+        d = torch.relu(d)
+        d = (d+d.transpose(1,2))*0.5 # symmetric
+        d = d.masked_fill(torch.eye(l).bool(), 0.) # 0 across diagonal
+        return d   
 
 # Define model 
 
 class InitModel(Module): # define rest of model
-    def __init__(self, vocab=7, max_len = 1024, n_blocks=9, hidden_size=256):
+    def __init__(self, vocab=6, max_len = 1024, n_blocks=9, hidden_size=256):
         super().__init__()
         self.b = vocab
         self.embedding = nn.Embedding(self.b, hidden_size, padding_idx=0) # map each base to a vector representation of size 256
         self.pos_embedding = nn.Embedding( max_len, hidden_size)
         self.convencoder = ConvEncoder(n_blocks=n_blocks, hidden_size=hidden_size)
-        self.output = nn.Linear(hidden_size, 3)
+        self.output=DistancePredictor(hidden_size=hidden_size)
+        #self.output = nn.Linear(hidden_size, 3)
 
     def forward(self, X):
 
@@ -171,70 +217,36 @@ class InitModel(Module): # define rest of model
 
         out = self.output(X)
         return(out)
-    
-# Define custom loss function on distance matrices rather than coords
 
-def pairwise_distance_matrix(X):
-    diff = X.unsqueeze(2) - X.unsqueeze(1)  # shape: (batch, 35, 35, 5)
-    return torch.norm(diff, dim=-1)
-
-class DistanceMatrixLoss(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.loss = MSELoss()
-    
-    def forward(self, y_true, y_pred, padding_mask):
-        y_true_m = pairwise_distance_matrix(y_true)
-        y_pred_m = pairwise_distance_matrix(y_pred)
-
-        valid = (~padding_mask).unsqueeze(2) & (~padding_mask).unsqueeze(1)
-        se = (y_true_m - y_pred_m).pow(2)
-        se_valid = se[valid]
-        return se_valid.mean()
-
-
-
-# Define function to convert coordinates to dataframe for TMScore calculation
-def coords_to_df_train(tensor_list):
-    flat_tensor = torch.cat(tensor_list, dim=0).flatten(0,1) # fuse tensors in list, then flatten (batch + seq)
-
-    n_seq = 0
-    seq_length = tensor_list[0].size()[1]
-    for i in tensor_list: # calculate number of sequences 
-        n_seq = n_seq + i.size()[0] 
-    
-    seq_ids = torch.arange(n_seq).repeat_interleave(seq_length).unsqueeze(1) # create ID for each seq in flat tensor
-    pred_idxs = torch.cat([seq_ids, flat_tensor], dim=1) # fuse IDs with tensor itself
-    df = pd.DataFrame(pred_idxs.detach().numpy()) # convert to dataframe
-    df.columns = ['seq_ID_int', "x", "y", "z"] 
-    return df 
 
 # TRAIN 
 max_seq_len = max(x.size(0) for x in dataset.X_list) * 2
 
-initmodel = InitModel(max_len=max_seq_len)
-#initmodel = torch.compile(initmodel, backend="aot_eager")
-criterion = DistanceMatrixLoss()
+initmodel = InitModel()
+criterion = MSELoss()
 optimiser = Adam(initmodel.parameters())
 
 cols = ["Epoch", "Train_Loss", "Test_Loss"]
 perf = pd.DataFrame(index=range(n_epochs), columns=cols)
 
 for epoch in range(n_epochs):
-    start_epoch = time.time()
-    print(f"Running epoch {epoch+1}")
     loss_train = []
+    epoch_pred_train = []
+    epoch_true_train = []
     num_ids = []
     seq_idx = []
     initmodel.train()
-    for seq, coords, ids, lengths in train_loader:
+    for seq, coords, ids, seq_lens in train_loader:
         pad_mask = (seq == 0)
         optimiser.zero_grad()
-        pred_coords = initmodel(seq)
-        loss = criterion(coords,pred_coords, pad_mask)
+        true = pairwise_distance_matrix(coords)
+        pred_i = initmodel(seq)
+        mask = (seq!=0).unsqueeze(1).expand_as(pred_i)
+        pred = pred_i[mask]
+        true = true[mask]
+        loss = criterion(pred,true)
         loss_train.append(loss.item())
         num_ids.extend(ids.flatten(0,1).tolist())
-        seq_idx.extend(seq.flatten(0,1).tolist())
         loss.backward()
         optimiser.step()
 
@@ -243,22 +255,25 @@ for epoch in range(n_epochs):
     initmodel.eval()
     with torch.no_grad():
         loss_test = []
-        for seq, coords, ids, lengths in test_loader:
-            pad_mask = (seq == 0)
-            pred_coords_test = initmodel(seq)
-            loss = criterion(coords, pred_coords_test, pad_mask)
+        for seq, coords, ids, seq_lens in test_loader:
+            pred_test = initmodel(seq)
+            true_test = pairwise_distance_matrix(coords)
+            mask = (seq!=0).unsqueeze(1).expand_as(pred_test)
+            pred_test = pred_test[mask]
+            true_test = true_test[mask]
+            loss = criterion(pred, true)
             loss_test.append(loss.item())
         
         loss_test_val = sum(loss_test)/len(loss_test)
     
-    perf.iloc[epoch, :] = [epoch+1, loss_train, loss_test_val]
-    end_epoch = time.time()
-    print(f"Epoch {epoch+1} ({end_epoch-start_epoch}s): Loss train {round(loss_train, 2)}, Loss Test {round(loss_test_val, 2)}")
+    perf.iloc[epoch, :] = [epoch+1, loss_train, loss_test]
+    print(f"Epoch {epoch+1}: Loss train {round(loss_train, 2)}, Loss Test {round(loss_test_val, 2)}")
 
-perf.to_csv(f'../outputs/InitialModel/initialmodel_perf{n_job}.csv')
+perf.to_csv("../outputs/DistPred/distpred_perf.csv")
 
 end = time.time()
-print(f"Time for job: {end-start}s")
+
+print(f"Time: {end-start}s")
 
 # VALIDATE
 
@@ -270,21 +285,31 @@ validation_lbl["ID_num"] = [n+1 for n in range(len(validation_lbl))] # map ID to
 id_mapping_val = {idx+1: og_id for idx, og_id in enumerate(validation_lbl['ID'])} # create mapping to re-map back to original ID
 id_mapping_val[0] = "padded_row"
 val_set = Rnadataset(validation_seq, validation_lbl)
+val_loader = DataLoader(val_set,batch_size=32,shuffle=False,num_workers=4,pin_memory=False,collate_fn=collate)
 
 # Make predictions on validation set
 initmodel.eval()
-val_pred = initmodel(val_set.X_tensor)
+all_preds = []
+with torch.no_grad():
+    for seq, coords, ids, lengths in val_loader:
+        pred = initmodel(seq)         
+        for b in range(pred.size(0)):
+            single = pred[b]          
+            mask   = seq[b] != 0
+            coords = distances_to_coords(single)
+            coords = coords[mask]
+            all_preds.append(coords)
 
-mask_val = (val_set.X_tensor.flatten(0,1) != 0)
-val_pred_flat = val_pred.flatten(0,1)
-val_seq_pred = val_pred_flat[mask_val]
+stacked = torch.cat(all_preds, dim=0)
 
 submission_cols = ['ID', 'resname', 'resid', 'x_1', 'y_1', 'z_1', 'x_2', 'y_2', 'z_2',
        'x_3', 'y_3', 'z_3', 'x_4', 'y_4', 'z_4', 'x_5', 'y_5', 'z_5']
 
-submission_df = pd.DataFrame(0.0, index = range(val_seq_pred.shape[0]), columns = submission_cols)
+submission_df = pd.DataFrame(0.0, index = range(stacked.size()[0]), columns = submission_cols)
 submission_df[['ID', 'resname', 'resid']] = validation_lbl[['ID', 'resname', 'resid']]
-submission_df[['x_1', 'y_1', 'z_1']] = val_seq_pred.detach().numpy()
+
+submission_df[['x_1', 'y_1', 'z_1']] = stacked.detach().numpy()
 submission_df.dtypes
-submission_df.to_csv(f'../outputs/InitialModel/submission{n_job}.csv')
+
+submission_df.to_csv("../outputs/DistPred/submission2.csv")
 
